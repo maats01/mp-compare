@@ -5,6 +5,7 @@ from time import sleep
 from xlsxwriter.utility import xl_col_to_name
 from keyring import get_credential, set_password, errors
 from pathlib import Path
+from statistics import mean
 
 SERVICE_NAME = "mp_compare"
 user_credential = get_credential(SERVICE_NAME, None)
@@ -83,6 +84,7 @@ n_matches = int(input("Number of matches to compare: "))
 mp_links = {}
 
 for i in range(1, n_matches + 1):
+    print("="*20)
     link = int(input(f"{i} - match id: "))
     blue_team_name = input(f"Blue team name: ")
     red_team_name = input(f"Red team name: ")
@@ -90,7 +92,6 @@ for i in range(1, n_matches + 1):
         "Blue": blue_team_name,
         "Red": red_team_name
     }
-    print("="*20)
 
 matches = []
 
@@ -101,6 +102,8 @@ headers = {
 }
 
 for id in mp_links.keys():
+    print("="*20)
+    print(f"Match ID: {id}")
     full_match_data = get_full_match_data(id, headers)
 
     if full_match_data:
@@ -131,7 +134,13 @@ for match in matches:
                 total_score = score["score"]
                 user_id = score["user_id"]
                 username = match["user_map"][user_id]
-                individual_scores_per_map[beatmap_id][username] = total_score
+
+                user_score = individual_scores_per_map.get(beatmap_id, {}).get(username)
+
+                if not user_score:
+                    individual_scores_per_map[beatmap_id][username] = [total_score]
+                else:
+                    individual_scores_per_map[beatmap_id][username].append(total_score)
 
                 team = score["match"]["team"]
                 
@@ -155,7 +164,12 @@ for match in matches:
 
 final_df = pd.concat(dfs_team_scores, axis=1)
 
-individual_scores_df = pd.DataFrame(individual_scores_per_map)
+individual_mean_scores_per_map = {
+    map_id: {user: mean(scores) for user, scores in users_scores.items()}
+    for map_id, users_scores in individual_scores_per_map.items()
+}
+
+individual_scores_df = pd.DataFrame(individual_mean_scores_per_map)
 
 mean_per_map = individual_scores_df.mean()
 std_per_map = individual_scores_df.std()
