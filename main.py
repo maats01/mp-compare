@@ -121,7 +121,7 @@ for match in matches:
             
             if beatmap_id not in individual_scores_per_map:
                 individual_scores_per_map[beatmap_id] = {}
-
+            
             beatmaps.append(beatmap_id)
 
             total_score_red = 0
@@ -150,7 +150,7 @@ for match in matches:
     }
 
     df = pd.DataFrame(data)
-    df = df.set_index("beatmap_id")
+    df = df.set_index("beatmap_id").groupby("beatmap_id").max()
     dfs_team_scores.append(df)
 
 final_df = pd.concat(dfs_team_scores, axis=1)
