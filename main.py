@@ -6,6 +6,7 @@ from xlsxwriter.utility import xl_col_to_name
 from keyring import get_credential, set_password, errors
 from pathlib import Path
 from statistics import mean
+from datetime import datetime
 
 SERVICE_NAME = "mp_compare"
 user_credential = get_credential(SERVICE_NAME, None)
@@ -198,9 +199,12 @@ if getattr(sys, 'frozen', False):
     base_path = Path(sys.executable).parent
 else:
     base_path = Path(__file__).parent
-    
+
+tourney_name = matches[0]["match"]["name"].split(":")[0]
+time_label = datetime.now().strftime("%Y%m%d_%H%M")
+
 output_dir = base_path / "results"
-output_file = output_dir / "results_sheet.xlsx"
+output_file = output_dir / f"{tourney_name}_{time_label}.xlsx"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -236,9 +240,6 @@ try:
             individual_scores_sheet.set_column(f"{col_letter}:{col_letter}", 10, integer_format)
         
         print("Results sheet succesfully created!")
-
-except PermissionError:
-    print("Couldn't save the file. Close the file before saving.")
 
 except FileNotFoundError:
     print("File path not found.")
