@@ -87,8 +87,8 @@ mp_links = {}
 for i in range(1, n_matches + 1):
     print("="*20)
     link = int(input(f"{i} - match id: "))
-    blue_team_name = input(f"Blue team name: ")
     red_team_name = input(f"Red team name: ")
+    blue_team_name = input(f"Blue team name: ")
     mp_links[link] = {
         "Blue": blue_team_name,
         "Red": red_team_name
