@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import sys
+import re
 from time import sleep
 from xlsxwriter.utility import xl_col_to_name
 from keyring import get_credential, set_password, errors
@@ -85,13 +86,10 @@ n_matches = int(input("Number of matches to compare: "))
 mp_links = {}
 
 for i in range(1, n_matches + 1):
-    print("="*20)
-    link = int(input(f"{i} - match id: "))
-    red_team_name = input(f"Red team name: ")
-    blue_team_name = input(f"Blue team name: ")
-    mp_links[link] = {
-        "Blue": blue_team_name,
-        "Red": red_team_name
+    mp_id = int(input(f"{i} - match id: "))
+    mp_links[mp_id] = {
+        "Blue": "",
+        "Red": ""
     }
 
 matches = []
@@ -108,6 +106,13 @@ for id in mp_links.keys():
     full_match_data = get_full_match_data(id, headers)
 
     if full_match_data:
+        match_title = re.search(r"([a-zA-Z0-9]+): \(([^)]+)\) (VS|vs) \(([^)]+)\)", full_match_data["match"]["name"])
+        red_team_name = match_title.group(2)
+        blue_team_name = match_title.group(4)
+
+        mp_links[id]["Red"] = red_team_name
+        mp_links[id]["Blue"] = blue_team_name
+
         matches.append(full_match_data)
 
 dfs_team_scores = []
