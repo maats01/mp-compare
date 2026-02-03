@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import sys
 import re
-from time import sleep
+from time import sleep, perf_counter
 from xlsxwriter.utility import xl_col_to_name
 from keyring import get_credential, set_password, errors
 from pathlib import Path
@@ -83,14 +83,16 @@ def get_full_match_data(match_id, headers):
 access_token = get_access_token()
 
 n_matches = int(input("Number of matches to compare: "))
-mp_links = {}
 
+mp_links = {}
 for i in range(1, n_matches + 1):
     mp_id = int(input(f"{i} - match id: "))
     mp_links[mp_id] = {
         "Blue": "",
         "Red": ""
     }
+
+start_total = perf_counter()
 
 matches = []
 
@@ -100,6 +102,7 @@ headers = {
     "Authorization": f"Bearer {access_token}"
 }
 
+start_api = perf_counter()
 for id in mp_links.keys():
     print("="*20)
     print(f"Match ID: {id}")
@@ -115,8 +118,11 @@ for id in mp_links.keys():
 
         matches.append(full_match_data)
 
+end_api = perf_counter()
+
 dfs_team_scores = []
 individual_scores_per_map = {}
+individual_scores_count = 0
 for match in matches:
     beatmaps = []
     blue_team_scores = []
@@ -137,6 +143,7 @@ for match in matches:
             total_score_blue = 0
 
             for score in game["scores"]:
+                individual_scores_count += 1
                 total_score = score["score"]
                 user_id = score["user_id"]
                 username = match["user_map"][user_id]
@@ -244,10 +251,22 @@ try:
             col_letter = xl_col_to_name(i + 1)
             individual_scores_sheet.set_column(f"{col_letter}:{col_letter}", 10, integer_format)
         
-        print("Results sheet succesfully created!")
+        print("Results sheet succesfully created!\n")
 
 except FileNotFoundError:
     print("File path not found.")
 
 except Exception as e:
     print(f"A unexpected problem happened while generating the excel file: {e}")
+
+end_total = perf_counter()
+
+api_time = end_api - start_api
+processing_time = end_total - end_api
+total_time = end_total - start_total
+
+print("--- Performance Report ---")
+print(f"Processed {individual_scores_count} scores from {len(matches)} matches.")
+print(f"Time spent consuming osu!'s API: {api_time:.3f}s.")
+print(f"Time spent processing the response: {processing_time:.3f}s.")
+print(f"Total running time: {total_time:.3f}s.")
