@@ -176,6 +176,7 @@ for match in matches:
     dfs_team_scores.append(df)
 
 final_df = pd.concat(dfs_team_scores, axis=1)
+final_df = final_df.T.groupby(final_df.columns).mean().T
 
 individual_mean_scores_per_map = {
     map_id: {user: mean(scores) for user, scores in users_scores.items()}
