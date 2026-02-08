@@ -80,7 +80,53 @@ def get_full_match_data(match_id, headers):
     match_metadata["user_map"] = all_users
     return match_metadata
 
+def get_team_names(match_name):
+    title = re.search(r"([a-zA-Z0-9]+): \(([^)]+)\) (VS|vs) \(([^)]+)\)", match_name)
+    red_team_name = title.group(2)
+    blue_team_name = title.group(4)
+
+    return red_team_name, blue_team_name
+
+def get_mappool_df(spreadsheet_link):
+    rule = r"https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)(?:.*[?&]gid=([0-9]+))?"
+    spreadsheet = re.search(rule, spreadsheet_link)
+
+    spreadsheet_id = spreadsheet.group(1)
+    sheet_id = spreadsheet.group(2)
+    url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&gid={sheet_id}"
+
+    mappool_df = pd.read_csv(url, header=None).replace(r'^[^a-zA-Z0-9]+$', None, regex=True)
+    mappool_df = mappool_df.replace(r'^\s*$', None, regex=True)
+    mappool_df = mappool_df.dropna(how="all", axis=1).dropna(how="all", axis=0)
+    
+    return mappool_df
+
+def get_slot_and_beatmapid_columns(df, beatmaps):
+    slot_col = None
+    map_id_col = None
+    slot_pattern = r"(NM|HD|HR|DT|TB)"
+
+    beatmaps = set(str(beatmap_id) for beatmap_id in beatmaps)
+
+    for col in df.columns:
+        col_data = df[col]
+
+        if slot_col is None:
+            if col_data.astype(str).str.match(slot_pattern, na=False).any():
+                slot_col = col
+
+        if map_id_col is None:
+            if col_data.astype(str).isin(beatmaps).any():
+                map_id_col = col
+
+        if slot_col is not None and map_id_col is not None:
+            break
+    
+    return slot_col, map_id_col
+
 access_token = get_access_token()
+
+spreadsheet_link = input("URL of the mappool (mappool sheet from the tourney's spreadsheet): ")
 
 n_matches = int(input("Number of matches to compare: "))
 
@@ -109,10 +155,7 @@ for id in mp_links.keys():
     full_match_data = get_full_match_data(id, headers)
 
     if full_match_data:
-        match_title = re.search(r"([a-zA-Z0-9]+): \(([^)]+)\) (VS|vs) \(([^)]+)\)", full_match_data["match"]["name"])
-        red_team_name = match_title.group(2)
-        blue_team_name = match_title.group(4)
-
+        red_team_name, blue_team_name = get_team_names(full_match_data["match"]["name"])
         mp_links[id]["Red"] = red_team_name
         mp_links[id]["Blue"] = blue_team_name
 
@@ -175,6 +218,17 @@ for match in matches:
     df = df.set_index("beatmap_id").groupby("beatmap_id").max()
     dfs_team_scores.append(df)
 
+# tenho que fazer algumas verificações aqui, caso o request da spreadsheet falhe
+mappool_df = get_mappool_df(spreadsheet_link)
+
+slot_mapping = {beatmap_id: "" for beatmap_id in individual_scores_per_map}
+
+slot_column, map_id_column = get_slot_and_beatmapid_columns(mappool_df, slot_mapping.keys())
+
+for beatmap_id in slot_mapping:
+    slot = mappool_df.loc[mappool_df[map_id_column] == str(beatmap_id), slot_column].values[0]
+    slot_mapping[beatmap_id] = slot
+
 final_df = pd.concat(dfs_team_scores, axis=1)
 final_df = final_df.T.groupby(final_df.columns).mean().T
 
@@ -187,25 +241,24 @@ individual_scores_df = pd.DataFrame(individual_mean_scores_per_map)
 
 mean_per_map = individual_scores_df.mean()
 std_per_map = individual_scores_df.std()
-df_z_scores = (individual_scores_df - mean_per_map) / std_per_map
+z_scores_df = (individual_scores_df - mean_per_map) / std_per_map
 
-df_z_scores = df_z_scores.round(2)
-df_z_scores["z_sum"] = df_z_scores.sum(axis=1)
-df_z_scores.sort_values(by="z_sum", ascending=False, inplace=True)
+z_scores_df = z_scores_df.round(2)
+z_scores_df["z_sum"] = z_scores_df.sum(axis=1)
+z_scores_df.sort_values(by="z_sum", ascending=False, inplace=True)
 
 base_beatmap_url = "https://osu.ppy.sh/beatmaps/"
-
 final_df.index = [
-    f'=HYPERLINK("{base_beatmap_url}{idx}", "{idx}")'
+    f'=HYPERLINK("{base_beatmap_url}{idx}", "{slot_mapping[idx]}")'
     for idx in final_df.index
 ]
 individual_scores_df.columns = [
-    f'=HYPERLINK("{base_beatmap_url}{col}", "{col}")'
+    f'=HYPERLINK("{base_beatmap_url}{col}", "{slot_mapping[col]}")'
     for col in individual_scores_df.columns
 ]
-df_z_scores.columns = [
-    f'=HYPERLINK("{base_beatmap_url}{col}", "{col}")' if str(col).isdigit() else col
-    for col in df_z_scores.columns
+z_scores_df.columns = [
+    f'=HYPERLINK("{base_beatmap_url}{col}", "{slot_mapping[col]}")' if str(col).isdigit() else col
+    for col in z_scores_df.columns
 ]
 
 if getattr(sys, 'frozen', False):
@@ -224,17 +277,10 @@ try:
     with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
         final_df.to_excel(writer, sheet_name="Team Scores", index=True)
         individual_scores_df.to_excel(writer, sheet_name="Individual Scores", index=True)
-        df_z_scores.to_excel(writer, sheet_name="Z-Scores", index=True)
+        z_scores_df.to_excel(writer, sheet_name="Z-Scores", index=True)
 
         workbook = writer.book
         integer_format = workbook.add_format({"num_format": "#,##0"})
-        header_format = workbook.add_format({
-            "bold": False,
-            "font_color": "blue",
-            "underline": 1,
-            "num_format": "@",
-            "align": "left"
-        })
 
         team_scores_sheet = writer.sheets["Team Scores"]
         individual_scores_sheet = writer.sheets["Individual Scores"]
@@ -242,7 +288,65 @@ try:
         
         individual_scores_sheet.set_column(0, 0, 20)
         z_scores_sheet.set_column(0, 0, 20)
-        individual_scores_sheet.set_row(0, None, header_format)
+
+        for row_num, value in enumerate(final_df.index):
+            actual_row = row_num + 1
+
+            if "NM" in value:
+                color = "#a4c2f4"
+            elif "HD" in value:
+                color = "#f9cb9c"
+            elif "HR" in value:
+                color = "#ea9999"
+            elif "DT" in value:
+                color = "#b4a7d6"
+            elif "FM" in value:
+                color = "#b6d7a8"
+            else:
+                color = "#a2c4c9"
+
+            format = workbook.add_format({"bg_color": color, "bold": True, "font_color": "#ffffff"})
+            team_scores_sheet.write(actual_row, 0, value, format)
+
+        for col_num, value in enumerate(individual_scores_df.columns):
+            actual_col = col_num + 1
+
+            if "NM" in value:
+                color = "#a4c2f4"
+            elif "HD" in value:
+                color = "#f9cb9c"
+            elif "HR" in value:
+                color = "#ea9999"
+            elif "DT" in value:
+                color = "#b4a7d6"
+            elif "FM" in value:
+                color = "#b6d7a8"
+            else:
+                color = "#a2c4c9"
+            
+            format = workbook.add_format({"bg_color": color, "bold": True, "font_color": "#ffffff"})
+            individual_scores_sheet.write(0, actual_col, value, format)
+
+        for col_num, value in enumerate(z_scores_df.columns):
+            actual_col = col_num + 1
+
+            if "NM" in value:
+                color = "#a4c2f4"
+            elif "HD" in value:
+                color = "#f9cb9c"
+            elif "HR" in value:
+                color = "#ea9999"
+            elif "DT" in value:
+                color = "#b4a7d6"
+            elif "FM" in value:
+                color = "#b6d7a8"
+            elif "TB" in value:
+                color = "#a2c4c9"
+            else:
+                color = "#000000"
+            
+            format = workbook.add_format({"bg_color": color, "bold": True, "font_color": "#ffffff"})
+            z_scores_sheet.write(0, actual_col, value, format)
 
         for i, col_name in enumerate(final_df.columns):
             col_letter = xl_col_to_name(i + 1)
@@ -251,7 +355,7 @@ try:
         for i, col_name in enumerate(individual_scores_df.columns):
             col_letter = xl_col_to_name(i + 1)
             individual_scores_sheet.set_column(f"{col_letter}:{col_letter}", 10, integer_format)
-        
+
         print("Results sheet succesfully created!\n")
 
 except FileNotFoundError:
